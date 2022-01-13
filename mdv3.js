@@ -34,6 +34,8 @@ class MangadexAPI {
 					}
 				}, (err, res, body) => {
 					this.token = body.token.session;
+					loginFile.token = body.token.session;
+					fs.writeFileSync(`${__dirname}/login.json`, JSON.stringify(loginFile, null, "\t"), { encoding: "utf-8" });
 					resolve(this);
 				});
 			})
