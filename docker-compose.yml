@@ -1,0 +1,8 @@
+version: "3.8"
+services: 
+  md_updater:
+    container_name: md_updater
+    image: md_updater
+    volumes: 
+      - ./data:/md_updater/data
+      - ./login.json:/md_updater/login.json

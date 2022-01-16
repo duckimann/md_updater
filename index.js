@@ -4,7 +4,7 @@ const ndz = require("node-stream-zip"),
 	request = require("request"),
 	archiver = require("archiver");
 
-let scanDir = path.resolve(`${__dirname}/../data/Ongoing`);
+let scanDir = path.resolve(`${__dirname}/data`);
 let dlDir = `${__dirname}/downloading`;
 let logFile = `${__dirname}/log.txt`;
 let fileStream = fs.createWriteStream(logFile, { encoding: "utf-8", flags: "a" });
@@ -49,26 +49,28 @@ function init() {
 		log("Initializing...");
 		log("Listing offline assets...");
 		let idsTable = {};
-		fs.readdirSync(scanDir, { encoding: "utf-8" }).reduce((cp, name) => cp.then(() => new Promise(resolve => {
-			log(`Reading dir: ${scanDir}/${name}`);
-			idsTable[ name ] = {
-				mdId: null,
-				chapters: [],
-				willDownload: [],
-			};
-			let files = fs.readdirSync(`${scanDir}/${name}`);
-	
-			files.reduce((ccp, file) => ccp.then(() => new Promise(async (res2) => {
-				let zip = new ndz.async({ file: `${scanDir}/${name}/${file}` });
-				let hasComicInfo = /comicinfo\.xml/gi.test( Object.keys(await zip.entries()).toString() );
-	
-				if (idsTable[name].mdId == null && hasComicInfo) idsTable[name].mdId = (await zip.entryData("ComicInfo.xml")).toString("utf-8").match(/(?<=title\/)[^\\\/<]+/gi)[0];
-				idsTable[name].chapters.push( file.match(/\d+(\.\d+)?/g)[0] );
-				res2();
-			})), Promise.resolve()).finally(() => {
-				resolve();
-			});
-		})), Promise.resolve()).finally(() => res(idsTable));
+		fs.readdirSync(scanDir, { encoding: "utf-8", withFileTypes: true })
+			.filter((item) => item.isDirectory())
+			.reduce((cp, { name }) => cp.then(() => new Promise(resolve => {
+				log(`Reading dir: ${scanDir}/${name}`);
+				idsTable[ name ] = {
+					mdId: null,
+					chapters: [],
+					willDownload: [],
+				};
+				let files = fs.readdirSync(`${scanDir}/${name}`);
+
+				files.reduce((ccp, file) => ccp.then(() => new Promise(async (res2) => {
+					let zip = new ndz.async({ file: `${scanDir}/${name}/${file}` });
+					let hasComicInfo = /comicinfo\.xml/gi.test( Object.keys(await zip.entries()).toString() );
+
+					if (idsTable[name].mdId == null && hasComicInfo) idsTable[name].mdId = (await zip.entryData("ComicInfo.xml")).toString("utf-8").match(/(?<=title\/)[^\\\/<]+/gi)[0];
+					idsTable[name].chapters.push( file.match(/\d+(\.\d+)?/g)[0] );
+					res2();
+				})), Promise.resolve()).finally(() => {
+					resolve();
+				});
+			})), Promise.resolve()).finally(() => res(idsTable));
 	}).then((items) => {
 		log("Fetching items...");
 		return Object.keys(items).reduce((cp, mangaName, index, { length: totalLen }) => cp.then(() => new Promise(res => {
@@ -82,7 +84,7 @@ function init() {
 					res();
 				});
 		})), Promise.resolve()).then(() => {
-			log(`Remove manga(s) with no new updates...`);
+			log(`Remove manga(s) with no new updates from download list...`);
 			Object.keys(items).filter((mangaName) => !items[mangaName].willDownload.length && delete items[mangaName]);
 			return items;
 		});
@@ -102,8 +104,12 @@ function init() {
 }
 
 let mdAPI = null;
-require("./mdv3.js")
-	.then((md) => { mdAPI = md; })
-	.finally(() => {
+(async () => {
+	mdAPI = await require("./mdv3.js");
+	if (mdAPI.token) {
+		console.log(mdAPI);
 		init();
-	});
+	} else {
+		new Error("Token/Login Credentials not found.");
+	}
+})();
