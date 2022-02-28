@@ -64,7 +64,10 @@ function init() {
 					let zip = new ndz.async({ file: `${scanDir}/${name}/${file}` });
 					let hasComicInfo = /comicinfo\.xml/gi.test( Object.keys(await zip.entries()).toString() );
 
-					if (idsTable[name].mdId == null && hasComicInfo) idsTable[name].mdId = (await zip.entryData("ComicInfo.xml")).toString("utf-8").match(/(?<=title\/)[^\\\/<]+/gi)[0];
+					if (idsTable[name].mdId == null && hasComicInfo) {
+						let match = (await zip.entryData("ComicInfo.xml")).toString("utf-8").match(/(?<=title\/)[^\\\/<\n]+/gi);
+						idsTable[name].mdId = (match.length) ? match[0] : "";
+					}
 					idsTable[name].chapters.push( file.match(/\d+(\.\d+)?/g)[0] );
 					res2();
 				})), Promise.resolve()).finally(() => {
@@ -75,14 +78,19 @@ function init() {
 		log("Fetching items...");
 		return Object.keys(items).reduce((cp, mangaName, index, { length: totalLen }) => cp.then(() => new Promise(res => {
 			log(`Fetching ${index +1}/${totalLen}: ${mangaName}`);
-			mdAPI.getMangaChapters(items[mangaName].mdId)
-				.then((mdRespose) => {
-					if (mdRespose.data.length !== items[mangaName].chapters.length) {
-						log(`${mangaName} | Filtering Chapters...`);
-						items[mangaName].willDownload = mdRespose.data.filter((chapter) => !items[mangaName].chapters.includes( chapter.attributes.chapter || "1" ) );
-					}
-					res();
-				});
+			if (items[mangaName].mdId !== null) {
+				mdAPI.getMangaChapters(items[mangaName].mdId)
+					.then((mdRespose) => {
+						if (mdRespose?.data?.length !== items[mangaName].chapters.length) {
+							log(`${mangaName} | Filtering Chapters...`);
+							// console.log(mdRespose)
+							items[mangaName].willDownload = mdRespose.data.filter((chapter) => !items[mangaName].chapters.includes( chapter.attributes.chapter || "1" ) );
+						}
+						res();
+					});
+			} else {
+				res();
+			}
 		})), Promise.resolve()).then(() => {
 			log(`Remove manga(s) with no new updates from download list...`);
 			Object.keys(items).filter((mangaName) => !items[mangaName].willDownload.length && delete items[mangaName]);
@@ -100,7 +108,7 @@ function init() {
 			})), Promise.resolve());
 		}
 	})
-	.finally(() => console.log("Done."));
+	.finally(() => log("Done."));
 }
 
 let mdAPI = null;
