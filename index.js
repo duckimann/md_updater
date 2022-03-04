@@ -51,8 +51,8 @@ function init() {
 		let idsTable = {};
 		fs.readdirSync(scanDir, { encoding: "utf-8", withFileTypes: true })
 			.filter((item) => item.isDirectory())
-			.reduce((cp, { name }) => cp.then(() => new Promise(resolve => {
-				log(`Reading dir: ${scanDir}/${name}`);
+			.reduce((cp, { name }, index, { length: totalLen }) => cp.then(() => new Promise(resolve => {
+				log(`Reading dir: ${index +1}/${totalLen}:${scanDir}/${name}`);
 				idsTable[ name ] = {
 					mdId: null,
 					chapters: [],
@@ -99,11 +99,14 @@ function init() {
 	}).then((items) => {
 		let keys = Object.keys(items);
 		if (keys.length) {
-			log("Download & Compress Chapters...");
+			log(`Download & Compress ${keys.length} Chapters...`);
 			return keys.reduce((cp, mangaName) => cp.then(() => new Promise(resolve => {
 				log(`Downloading Manga: ${mangaName}`);
-				items[mangaName].willDownload.reduce((cp2, chapter) => 
-					cp2.then(() => downloadChapter(chapter)).then(() => compressChapter(mangaName, chapter.id, chapter.attributes.chapter))
+				items[mangaName].willDownload.reduce((cp2, chapter, index, { length: totalLen }) => 
+					cp2.then(() => {
+						log(`Downloading Manga: ${index +1}/${totalLen}:${mangaName}/${chapter}`);
+						return downloadChapter(chapter);
+					}).then(() => compressChapter(mangaName, chapter.id, chapter.attributes.chapter))
 				, Promise.resolve()).finally(() => resolve());
 			})), Promise.resolve());
 		}
