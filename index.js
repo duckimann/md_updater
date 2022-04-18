@@ -4,16 +4,20 @@ const ndz = require("node-stream-zip"),
 	request = require("request"),
 	archiver = require("archiver");
 
+const envs = {
+	isDocker: process.env.IS_DOCKER || false,
+	timeout: process.env.TIMEOUT || 0,
+};
+
 let scanDir = path.resolve(`${__dirname}/data`);
 let dlDir = `${__dirname}/downloading`;
 let logFile = `${__dirname}/log.txt`;
 let fileStream = fs.createWriteStream(logFile, { encoding: "utf-8", flags: "a" });
 
 function log(msg) {
-	let d = new Date();
-	let logMsg = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours()}:${d.getMinutes()}:${d.getSeconds()} | ${msg}`;
-	console.log(logMsg);
-	fileStream.write(`${logMsg}\n`);
+	let d = new Date(), dStr = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+	console.log(`${(envs.isDocker === "true") ? "" : `${dStr} | `}${msg}`);
+	fileStream.write(`${dStr} | ${msg}\n`);
 }
 async function downloadChapter(chapterObj) {
 	let chapterData = await mdAPI.getChapter(chapterObj.id);
@@ -99,14 +103,22 @@ function init() {
 	}).then((items) => {
 		let keys = Object.keys(items);
 		if (keys.length) {
-			log(`Download & Compress ${keys.length} Chapters...`);
+			log(`Download & Compress ${keys.length} Manga(s)...`);
 			return keys.reduce((cp, mangaName) => cp.then(() => new Promise(resolve => {
 				log(`Downloading Manga: ${mangaName}`);
 				items[mangaName].willDownload.reduce((cp2, chapter, index, { length: totalLen }) => 
-					cp2.then(() => {
-						log(`Downloading Manga: ${index +1}/${totalLen}:${mangaName}/${chapter}`);
-						return downloadChapter(chapter);
-					}).then(() => compressChapter(mangaName, chapter.id, chapter.attributes.chapter))
+					cp2
+						.then(() => {
+							log(`Downloading Manga: ${index +1}/${totalLen}:${mangaName}/${chapter.attributes.chapter} || ${chapter.id}`);
+							return downloadChapter(chapter);
+						})
+						.then(() => compressChapter(mangaName, chapter.id, chapter.attributes.chapter))
+						.then(() => new Promise((resolve) => {
+							log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+							setTimeout(() => {
+								resolve();
+							}, +envs.timeout * 1000);
+						}))
 				, Promise.resolve()).finally(() => resolve());
 			})), Promise.resolve());
 		}
