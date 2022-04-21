@@ -20,15 +20,15 @@ function log(msg) {
 	fileStream.write(`${dStr} | ${msg}\n`);
 }
 async function downloadChapter(chapterObj) {
-	let chapterData = await mdAPI.getChapter(chapterObj.id);
-	let path = `${dlDir}/${chapterObj.id}`;
+	let chapterData = await mdAPI.getChapter(chapterObj.chapterId);
+	let path = `${dlDir}/${chapterObj.chapterId}`;
 
 	if (!fs.existsSync(path)) fs.mkdirSync(path, { recursive: true });
 	return chapterData.urls.reduce((cp, url, index, {length: arr}) => cp.then((e) => new Promise((resolve) => {
 		let localName = `${index}${url.match(/.[a-z]+$/g)[0]}`
 		setTimeout(() => {
 			request(url).pipe(fs.createWriteStream(`${path}/${localName}`)).on("close", function() {
-				log(`Downloaded: ${index + 1}/${arr}: ${chapterObj.id}/${localName}`);
+				log(`Downloaded: ${index + 1}/${arr}: ${chapterObj.chapterId}/${localName}`);
 				resolve();
 			});
 		}, 100);
@@ -55,16 +55,15 @@ function init() {
 		let idsTable = {};
 		fs.readdirSync(scanDir, { encoding: "utf-8", withFileTypes: true })
 			.filter((item) => item.isDirectory())
-			.reduce((cp, { name }, index, { length: totalLen }) => cp.then(() => new Promise(resolve => {
+			.reduce((cp, { name }, index, { length: totalLen }) => cp.then(() => new Promise(async (resolve) => {
 				log(`Reading dir: ${index +1}/${totalLen}:${scanDir}/${name}`);
 				idsTable[ name ] = {
 					mdId: null,
 					chapters: [],
-					willDownload: [],
 				};
 				let files = fs.readdirSync(`${scanDir}/${name}`);
 
-				files.reduce((ccp, file) => ccp.then(() => new Promise(async (res2) => {
+				for (let file of files) {
 					let zip = new ndz.async({ file: `${scanDir}/${name}/${file}` });
 					let hasComicInfo = /comicinfo\.xml/gi.test( Object.keys(await zip.entries()).toString() );
 
@@ -73,53 +72,52 @@ function init() {
 						idsTable[name].mdId = (match.length) ? match[0] : "";
 					}
 					idsTable[name].chapters.push( file.match(/\d+(\.\d+)?/g)[0] );
-					res2();
-				})), Promise.resolve()).finally(() => {
-					resolve();
-				});
-			})), Promise.resolve()).finally(() => res(idsTable));
-	}).then((items) => {
+				}
+				resolve();
+			})), Promise.resolve()).finally(() => {
+				log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+				setTimeout(() => {
+					res(idsTable);
+				}, +envs.timeout * 1000);
+			});
+	})
+	.then((items) => {
+		let dlList = [],
+			hashTable = {};
 		log("Fetching items...");
 		return Object.keys(items).reduce((cp, mangaName, index, { length: totalLen }) => cp.then(() => new Promise(res => {
 			log(`Fetching ${index +1}/${totalLen}: ${mangaName}`);
-			if (items[mangaName].mdId !== null) {
-				mdAPI.getMangaChapters(items[mangaName].mdId)
-					.then((mdRespose) => {
-						if (mdRespose?.data?.length !== items[mangaName].chapters.length) {
-							log(`${mangaName} | Filtering Chapters...`);
-							// console.log(mdRespose)
-							items[mangaName].willDownload = mdRespose.data.filter((chapter) => !items[mangaName].chapters.includes( chapter.attributes.chapter || "1" ) );
-						}
-						res();
-					});
-			} else {
+			let manga = items[mangaName];
+			hashTable[mangaName] = manga.chapters;
+			if (manga.mdId === null) return res();
+			mdAPI.getMangaChapters(manga.mdId).then((mdResponse) => {
+				for (let item of mdResponse.data) {
+					if (!hashTable[mangaName].includes(item.attributes.chapter)) {
+						dlList.push({
+							name: mangaName,
+							chapter: item.attributes.chapter,
+							chapterId: item.id
+						});
+						hashTable[mangaName].push(item.attributes.chapter);
+					}
+				}
 				res();
-			}
-		})), Promise.resolve()).then(() => {
-			log(`Remove manga(s) with no new updates from download list...`);
-			Object.keys(items).filter((mangaName) => !items[mangaName].willDownload.length && delete items[mangaName]);
-			return items;
-		});
-	}).then((items) => {
-		let keys = Object.keys(items);
-		if (keys.length) {
-			log(`Download & Compress ${keys.length} Manga(s)...`);
-			return keys.reduce((cp, mangaName) => cp.then(() => new Promise(resolve => {
-				log(`Downloading Manga: ${mangaName}`);
-				items[mangaName].willDownload.reduce((cp2, chapter, index, { length: totalLen }) => 
-					cp2
-						.then(() => {
-							log(`Downloading Manga: ${index +1}/${totalLen}:${mangaName}/${chapter.attributes.chapter} || ${chapter.id}`);
-							return downloadChapter(chapter);
-						})
-						.then(() => compressChapter(mangaName, chapter.id, chapter.attributes.chapter))
-						.then(() => new Promise((resolve) => {
-							log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
-							setTimeout(() => {
-								resolve();
-							}, +envs.timeout * 1000);
-						}))
-				, Promise.resolve()).finally(() => resolve());
+			});
+		})), Promise.resolve()).then((res) => dlList);
+	})
+	.then((items) => {
+		if (items.length) {
+			log(`Download & Compress ${items.length} Chapter(s)...`);
+			return items.reduce((cp, item, index, {length: total}) => cp.then(() => new Promise((res) => {
+				log(`${index +1}/${total} || ${item.chapterId} | ${item.name}/${item.chapter}`);
+				Promise.resolve(downloadChapter(item))
+					.then(() => compressChapter(item.name, item.chapterId, item.chapter))
+					.then(() => {
+						log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+						setTimeout(() => {
+							res();
+						}, +envs.timeout * 1000);
+					})
 			})), Promise.resolve());
 		}
 	})
@@ -133,6 +131,6 @@ let mdAPI = null;
 		console.log(mdAPI);
 		init();
 	} else {
-		new Error("Token/Login Credentials not found.");
+		throw new Error("Token/Login Credentials not found.");
 	}
 })();
