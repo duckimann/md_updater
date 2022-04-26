@@ -75,10 +75,7 @@ function init() {
 				}
 				resolve();
 			})), Promise.resolve()).finally(() => {
-				log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
-				setTimeout(() => {
-					res(idsTable);
-				}, +envs.timeout * 1000);
+				res(idsTable);
 			});
 	})
 	.then((items) => {
@@ -103,7 +100,12 @@ function init() {
 				}
 				res();
 			});
-		})), Promise.resolve()).then((res) => dlList);
+		})), Promise.resolve()).then(() => new Promise((res) => {
+			log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+			setTimeout(() => {
+				res(dlList);
+			}, +envs.timeout * 1000);
+		}));
 	})
 	.then((items) => {
 		if (items.length) {
