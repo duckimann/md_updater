@@ -1,6 +1,9 @@
 version: "3.8"
 services: 
   md_updater:
+    build:
+      context: .
+      dockerfile: dockerfile
     container_name: md_updater
     image: md_updater
     environment:

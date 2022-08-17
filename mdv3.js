@@ -48,7 +48,7 @@ class MangadexAPI {
 
 	genChapterImgsURL = (hash, pages) => {
 		if (!Array.isArray(pages)) pages = [ pages ];
-		return pages.map((page) => `${this.uploads}/${this.token}/data/${hash}/${page}`);
+		return pages.map((page) => `${this.uploads}/data/${hash}/${page}`);
 	}
 
 	getChapter = (chapterId) => {
