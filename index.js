@@ -1,17 +1,21 @@
 const fs = require("fs"),
-	path = require("path");
+	path = require("path"),
+	{ spawn } = require("child_process");
 const ndz = require("node-stream-zip"),
-	request = require("request"),
+	fet = require("node-fetch"),
+	// request = require("request"),
 	archiver = require("archiver");
 
 const envs = {
 	isDocker: process.env.IS_DOCKER || false,
 	timeout: process.env.TIMEOUT || 0,
+	useWget: process.env.USE_WGET || false,
 };
 
 let scanDir = path.resolve(`${__dirname}/data`);
 let dlDir = `${__dirname}/downloading`;
 let logFile = `${__dirname}/log.txt`;
+let blacklisted = fs.readFileSync(`${__dirname}/blacklisted.txt`, { encoding: "utf-8" });
 let fileStream = fs.createWriteStream(logFile, { encoding: "utf-8", flags: "a" });
 
 function log(msg) {
@@ -27,11 +31,32 @@ async function downloadChapter(chapterObj) {
 	return chapterData.urls.reduce((cp, url, index, {length: arr}) => cp.then((e) => new Promise((resolve) => {
 		let localName = `${index}${url.match(/.[a-z]+$/g)[0]}`
 		setTimeout(() => {
-			request(url).pipe(fs.createWriteStream(`${path}/${localName}`)).on("close", function() {
-				log(`Downloaded: ${index + 1}/${arr}: ${chapterObj.chapterId}/${localName}`);
-				resolve();
-			});
-		}, 100);
+			if (envs.useWget) {
+				let retry = 0;
+				const recall = () => {
+					const child = spawn("wget", [`${url}`, `-O`, `${path}/${localName}`]);
+					child.stderr.on("data", (data) => {
+						log(`[WGET] ${data.toString()}`);
+					});
+					child.on("exit", (code) => {
+						if (code !== 0) {
+							log(`[WGET][${code}] Retry No. ${++retry}`);
+							return recall();
+						}
+
+						log(`[WGET][${code}] Downloaded: ${index + 1}/${arr}: ${chapterObj.chapterId}/${localName}`);
+						resolve();
+					});
+				}
+				recall();
+			} else {
+				fet(url, { timeout: 0 }).then((res) => res.arrayBuffer()).then((res) => {
+					fs.writeFileSync(`${path}/${localName}`, Buffer.from(res));
+					log(`Downloaded: ${index + 1}/${arr}: ${chapterObj.chapterId}/${localName}`);
+					resolve();
+				});
+			}
+		}, 1000);
 	})), Promise.resolve());
 }
 function compressChapter(serie, chapterId, chapter) {
@@ -87,6 +112,10 @@ function init() {
 			let manga = items[mangaName];
 			hashTable[mangaName] = manga.chapters;
 			if (manga.mdId === null) return res();
+			if ((new RegExp(manga.mdId, "gi")).test(blacklisted)) {
+				log(`[Blacklisted] ${manga.mdId} Moving on...`);
+				return res();
+			}
 			mdAPI.getMangaChapters(manga.mdId).then((mdResponse) => {
 				for (let item of mdResponse.data) {
 					if (!hashTable[mangaName].includes(item.attributes.chapter)) {
@@ -98,13 +127,20 @@ function init() {
 						hashTable[mangaName].push(item.attributes.chapter);
 					}
 				}
-				res();
+				if (index && !(index % 5)) {
+					log(`[Fetch Chapters] Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+					setTimeout(() => {
+						res();
+					}, +envs.timeout * 1000);
+				} else {
+					res();
+				}
 			});
 		})), Promise.resolve()).then(() => new Promise((res) => {
-			log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+			log(`[Post Fetch] Timeout for ${(+envs.timeout) / 2} second(s) to avoid rate limit.`);
 			setTimeout(() => {
 				res(dlList);
-			}, +envs.timeout * 1000);
+			}, +envs.timeout * 500);
 		}));
 	})
 	.then((items) => {
@@ -115,7 +151,7 @@ function init() {
 				Promise.resolve(downloadChapter(item))
 					.then(() => compressChapter(item.name, item.chapterId, item.chapter))
 					.then(() => {
-						log(`Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
+						log(`[Download] Timeout for ${envs.timeout} second(s) to avoid rate limit.`);
 						setTimeout(() => {
 							res();
 						}, +envs.timeout * 1000);

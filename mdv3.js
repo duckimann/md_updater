@@ -1,7 +1,19 @@
-const req = require("request"), fetch = (url) => new Promise((resolve) => {
-	req(url, (err, res, body) => {
-		resolve(JSON.parse(body));
-	});
+const fet = require("node-fetch"), fetch = (url) => new Promise((resolve) => {
+	const anon = () => {
+		fet(url, { timeout: 0 }).then((res) => res.text()).then((res) => {
+			if (!res || res === undefined || res === 'undefined') {
+				console.log(err, res, body)
+				console.log(`[Retrying] Err @ ${url}`);
+				setTimeout(() => {
+					anon();
+				}, 5000);
+				return;
+			}
+			resolve(JSON.parse(res));
+		});
+	}
+
+	anon();
 });
 
 const fs = require("fs"),

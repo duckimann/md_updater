@@ -9,6 +9,9 @@ services:
     environment:
       - IS_DOCKER=true
       - TIMEOUT=4
+      - USE_WGET=true
     volumes: 
       - ./data:/md_updater/data
       - ./login.json:/md_updater/login.json
+      - ./log.txt:/md_updater/log.txt
+      - ./blacklisted.txt:/md_updater/blacklisted.txt
